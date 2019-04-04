@@ -1,0 +1,61 @@
+---
+- hosts: localhost
+  tasks:
+   - name: Configure AWS virtual private clouds
+     ec2_vpc_net:
+      cidr_block: 10.1.97.0/24
+      region: us-west-1
+      name: New_aws_vpc_1
+      state: present
+     register: vpc_creation
+   - name: Creating new internet gateway
+     ec2_vpc_igw:
+      region: us-west-1
+      state: present
+      vpc_id: "{{vpc_creation.vpc.id}}"
+     register: gateway_create
+   - name: Creating a subnet for new EC2 instances
+     ec2_vpc_subnet:
+      cidr: 10.1.97.0/28
+      region: us-west-1
+      vpc_id: "{{vpc_creation.vpc.id}}"
+      map_public: yes
+      state: present
+     register: new_subnet
+   - name: Adding routes for VPC
+     ec2_vpc_route_table:
+      region: us-west-1
+      vpc_id: "{{vpc_creation.vpc.id}}"
+      subnets: "{{new_subnet.subnet.id}}"
+      routes:
+       - dest: 0.0.0.0/0
+         gateway_id: "{{gateway_create.gateway_id}}"
+      state: present
+   - name: Creating new security group
+     ec2_group:
+      description: Allow 22 and 80 ports open
+      name: ansible_group
+      region: us-west-1
+      vpc_id: "{{vpc_creation.vpc.id}}"
+      rules:
+       - proto: tcp
+         ports:
+          - 22
+          - 80
+
+# I would like to allow both 22 and 80 ports only from my IP 122.175.21.37
+         cidr_ip: 122.175.21.37/32
+         rule_desc: Allow 22 and 80 from all
+      state: present
+     register: new_security_group_creation
+   - name: New EC2 instance creation
+     ec2:
+       count: 3
+       instance_type: t2.micro
+
+# This is the image ID of "Red Hat Enterprise Linux 7.5 (HVM), SSD Volume Type"
+       image: ami-18726478
+       group_id: "{{new_security_group_creation.group_id}}"
+       key_name: ansible_test
+       region: us-west-1
+       vpc_subnet_id: "{{new_subnet.subnet.id}}"
